@@ -506,3 +506,44 @@ task.spawn(function()
         end
     end
 end)
+pcall(function()
+    setscriptable(LocalPlayer, "SimulationRadius", true)
+    sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+end)
+
+local function bringMobs(mobName, centerCFrame)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == mobName then
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local root = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+
+            if hum and hum.Health > 0 and root then
+                if (root.Position - centerCFrame.Position).Magnitude <= 350 then
+                    for _, part in ipairs(mob:GetChildren()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    root.AssemblyAngularVelocity = Vector3.zero
+                    hum.WalkSpeed = 0
+
+                    local bv = root:FindFirstChild("FarmingVelocity")
+                    if not bv then
+                        bv = Instance.new("BodyVelocity")
+                        bv.Name = "FarmingVelocity"
+                        bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                        bv.Velocity = Vector3.zero
+                        bv.Parent = root
+                    end
+
+                    root.CFrame = centerCFrame
+                end
+            end
+        end
+    end
+end
