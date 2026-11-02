@@ -11,11 +11,18 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 repeat task.wait() until LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer:FindFirstChild("Data")
 
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualUser = game:GetService("VirtualUser")
 local TeleportService = game:GetService("TeleportService")
+local VirtualUser = game:GetService("VirtualUser")
+
+local TWEEN_SPEED = 300
+local FARM_HEIGHT = 15
+local ATTACK_DIST = 65
+
+local isWorld1 = game.PlaceId == 2753915549 or game.PlaceId == 85211729168715
+local isWorld2 = game.PlaceId == 4442272183 or game.PlaceId == 79091703265657
+local isWorld3 = game.PlaceId == 7449423635 or game.PlaceId == 100117331123089
 
 local Quests = require(ReplicatedStorage:WaitForChild("Quests"))
 local GuideModule = require(ReplicatedStorage:WaitForChild("GuideModule"))
@@ -23,13 +30,12 @@ local NPCList = GuideModule.Data.NPCList
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local CommF_ = Remotes:WaitForChild("CommF_")
 
-local isWorld1 = game.PlaceId == 2753915549 or game.PlaceId == 85211729168715
-local isWorld2 = game.PlaceId == 4442272183 or game.PlaceId == 79091703265657
-local isWorld3 = game.PlaceId == 7449423635 or game.PlaceId == 100117331123089
+local net = ReplicatedStorage:FindFirstChild("Modules")
+net = net and net:FindFirstChild("Net")
+local reRegisterAttack = net and net:FindFirstChild("RE/RegisterAttack")
+local reRegisterHit = net and net:FindFirstChild("RE/RegisterHit")
 
 local AutoFarmEnabled = false
-local currentTween = nil
-local noclipConnection = nil
 
 pcall(function()
     setscriptable(LocalPlayer, "SimulationRadius", true)
@@ -55,6 +61,221 @@ local function getCurrentWorldName()
     if isWorld2 then return "World 2" end
     if isWorld3 then return "World 3" end
     return "Unknown"
+end
+
+local TweenController = {
+    Playing = false,
+    Hovering = false,
+    HoverCFrame = nil,
+    HeartbeatConn = nil,
+    CollisionParts = {},
+    CollisionConn = nil
+}
+
+local function prepareNoclip()
+    local character = LocalPlayer.Character
+    if not character then return end
+
+    if TweenController.CollisionConn then
+        TweenController.CollisionConn:Disconnect()
+        TweenController.CollisionConn = nil
+    end
+
+    table.clear(TweenController.CollisionParts)
+
+    for _, desc in ipairs(character:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            table.insert(TweenController.CollisionParts, desc)
+            desc.CanCollide = false
+        end
+    end
+
+    TweenController.CollisionConn = character.DescendantAdded:Connect(function(part)
+        if part:IsA("BasePart") then
+            table.insert(TweenController.CollisionParts, part)
+            part.CanCollide = false
+        end
+    end)
+end
+
+local function stopTween(keepHover)
+    if TweenController.HeartbeatConn then
+        pcall(function() TweenController.HeartbeatConn:Disconnect() end)
+        TweenController.HeartbeatConn = nil
+    end
+
+    TweenController.Playing = false
+
+    if not keepHover then
+        TweenController.Hovering = false
+        TweenController.HoverCFrame = nil
+    end
+
+    local char = LocalPlayer.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local muse = hrp:FindFirstChild("muse")
+            if muse then muse:Destroy() end
+        end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.AutoRotate = true end
+    end
+end
+
+RunService.Stepped:Connect(function()
+    if not AutoFarmEnabled then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    if TweenController.Playing or TweenController.Hovering then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+
+        if TweenController.Hovering and TweenController.HoverCFrame and not TweenController.Playing then
+            hrp.CFrame = TweenController.HoverCFrame
+        end
+
+        for i = #TweenController.CollisionParts, 1, -1 do
+            local part = TweenController.CollisionParts[i]
+            if part and part.Parent then
+                if part.CanCollide then part.CanCollide = false end
+            else
+                table.remove(TweenController.CollisionParts, i)
+            end
+        end
+    end
+end)
+
+local function tweenTo(targetCFrame, speedOverride)
+    if not targetCFrame then return end
+    local targetPos = (typeof(targetCFrame) == "CFrame" and targetCFrame.Position) or targetCFrame
+    local finalCFrame = (typeof(targetCFrame) == "CFrame" and targetCFrame) or CFrame.new(targetPos)
+
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return end
+
+    stopTween(false)
+    prepareNoclip()
+    hum.AutoRotate = false
+
+    local muse = hrp:FindFirstChild("muse")
+    if not muse then
+        muse = Instance.new("BodyVelocity")
+        muse.Name = "muse"
+        muse.MaxForce = Vector3.new(0, math.huge, 0)
+        muse.Velocity = Vector3.zero
+        muse.Parent = hrp
+    end
+
+    TweenController.Playing = true
+    local speed = speedOverride or TWEEN_SPEED
+
+    local finished = false
+    TweenController.HeartbeatConn = RunService.Heartbeat:Connect(function(deltaTime)
+        if not TweenController.Playing or not hrp.Parent then
+            stopTween(false)
+            finished = true
+            return
+        end
+
+        local currentPos = hrp.Position
+        local delta = targetPos - currentPos
+        local dist = delta.Magnitude
+
+        local currentSpeed = speed
+        if dist < 18 then
+            currentSpeed = 35
+        end
+
+        local stepDist = currentSpeed * math.min(deltaTime, 0.07)
+
+        if dist <= math.max(stepDist, 1.8) then
+            hrp.CFrame = finalCFrame
+            TweenController.Hovering = true
+            TweenController.HoverCFrame = finalCFrame
+            stopTween(true)
+            finished = true
+            return
+        end
+
+        local nextPos = currentPos + (delta.Unit * stepDist)
+        hrp.CFrame = CFrame.new(nextPos, targetPos)
+    end)
+
+    while not finished and TweenController.Playing and AutoFarmEnabled do
+        task.wait(0.05)
+    end
+end
+
+local CombatController = {
+    M1Combo = 0,
+    ComboDebounce = 0,
+    Debounce = 0
+}
+
+local function getBladeHits(char, attackDist)
+    local hits = {}
+    local myPos = char:GetPivot().Position
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if not enemiesFolder then return hits end
+
+    for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+        local hum = enemy:FindFirstChildOfClass("Humanoid")
+        local root = enemy:FindFirstChild("HumanoidRootPart")
+        if hum and hum.Health > 0 and root then
+            if (myPos - root.Position).Magnitude <= attackDist then
+                table.insert(hits, {enemy, root})
+            end
+        end
+    end
+    return hits
+end
+
+local function executeFastAttack()
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool or (tool.ToolTip ~= "Melee" and tool.ToolTip ~= "Sword") then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and (t.ToolTip == "Melee" or t.ToolTip == "Sword") then
+                    char.Humanoid:EquipTool(t)
+                    tool = t
+                    break
+                end
+            end
+        end
+    end
+
+    if not char:FindFirstChild("HasBuso") then
+        pcall(function() CommF_:InvokeServer("Buso") end)
+    end
+
+    if (tick() - CombatController.ComboDebounce) <= 0.01 then
+        CombatController.M1Combo = (CombatController.M1Combo >= 2 and 1) or (CombatController.M1Combo + 1)
+    else
+        CombatController.M1Combo = 1
+    end
+    CombatController.ComboDebounce = tick()
+
+    local bladeHits = getBladeHits(char, ATTACK_DIST)
+
+    if #bladeHits > 0 and reRegisterAttack and reRegisterHit then
+        local primaryTarget = bladeHits[1][2]
+        reRegisterAttack:FireServer(CombatController.M1Combo)
+        reRegisterHit:FireServer(primaryTarget, bladeHits)
+    else
+        VirtualUser:CaptureController()
+        VirtualUser:Button1Down(Vector2.zero)
+    end
 end
 
 local function bringMobs(mobName, centerCFrame)
@@ -273,96 +494,19 @@ local function getTargetMob(mobName)
     return nearestMob
 end
 
-local function equipBestWeapon()
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChildOfClass("Humanoid") then return end
-
-    for _, tool in ipairs(char:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool:FindFirstChild("Combat")) then
-            return
-        end
+local function checkWorldHop(currentLevel)
+    if isWorld1 and currentLevel >= 700 then
+        pcall(function() CommF_:InvokeServer("TravelDressrosa") end)
+        task.wait(3)
+        pcall(function() TeleportService:Teleport(4442272183, LocalPlayer) end)
+        return true
+    elseif isWorld2 and currentLevel >= 1500 then
+        pcall(function() CommF_:InvokeServer("TravelZou") end)
+        task.wait(3)
+        pcall(function() TeleportService:Teleport(7449423635, LocalPlayer) end)
+        return true
     end
-
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not backpack then return end
-
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.ToolTip == "Melee" or tool.ToolTip == "Sword" or tool:FindFirstChild("Combat")) then
-            char.Humanoid:EquipTool(tool)
-            return
-        end
-    end
-
-    local firstTool = backpack:FindFirstChildOfClass("Tool")
-    if firstTool then
-        char.Humanoid:EquipTool(firstTool)
-    end
-end
-
-local function toCFrame(targetCFrame)
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
-
-    local dist = (targetCFrame.Position - hrp.Position).Magnitude
-    if dist <= 12 then
-        hrp.CFrame = targetCFrame
-        return
-    end
-
-    local speed = 320
-    local tweenTime = dist / speed
-    local info = TweenInfo.new(tweenTime, Enum.EasingStyle.Linear)
-
-    if currentTween then
-        currentTween:Cancel()
-    end
-
-    currentTween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
-    currentTween:Play()
-
-    local start = os.clock()
-    while AutoFarmEnabled and (os.clock() - start) < (tweenTime + 0.3) do
-        if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then break end
-        if (targetCFrame.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude <= 12 then
-            break
-        end
-        task.wait(0.05)
-    end
-
-    if currentTween then
-        currentTween:Cancel()
-        currentTween = nil
-    end
-end
-
-local function attackEnemy(enemy)
-    local char = LocalPlayer.Character
-    if not char then return end
-
-    if not char:FindFirstChild("HasBuso") then
-        pcall(function()
-            CommF_:InvokeServer("Buso")
-        end)
-    end
-
-    equipBestWeapon()
-
-    local net = ReplicatedStorage:FindFirstChild("Modules")
-    net = net and net:FindFirstChild("Net")
-    if net then
-        local regAttack = net:FindFirstChild("RE/RegisterAttack")
-        local regHit = net:FindFirstChild("RE/RegisterHit")
-        if regAttack then
-            regAttack:FireServer(0)
-        end
-        if regHit and enemy and enemy:FindFirstChild("Head") and enemy:FindFirstChild("HumanoidRootPart") then
-            regHit:FireServer(enemy.Head, {enemy.HumanoidRootPart})
-        end
-    end
-
-    VirtualUser:CaptureController()
-    VirtualUser:Button1Down(Vector2.zero)
+    return false
 end
 
 local parentGui = getHUI()
@@ -434,36 +578,14 @@ local Footnote = Instance.new("TextLabel")
 Footnote.Size = UDim2.new(1, 0, 0, 20)
 Footnote.Position = UDim2.new(0, 0, 0, 165)
 Footnote.BackgroundTransparency = 1
-Footnote.Text = "Tự đổi World + Gom quái + Farm Max Lv"
+Footnote.Text = "Tốc độ: " .. tostring(TWEEN_SPEED) .. " studs/s | Đánh Fast Attack"
 Footnote.TextColor3 = Color3.fromRGB(110, 115, 135)
 Footnote.Font = Enum.Font.GothamMedium
 Footnote.TextSize = 9
 Footnote.Parent = MainFrame
 
-local function setNoclip(enabled)
-    if enabled then
-        if not noclipConnection then
-            noclipConnection = RunService.Stepped:Connect(function()
-                if AutoFarmEnabled and LocalPlayer.Character then
-                    for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
-                        if part:IsA("BasePart") and part.CanCollide then
-                            part.CanCollide = false
-                        end
-                    end
-                end
-            end)
-        end
-    else
-        if noclipConnection then
-            noclipConnection:Disconnect()
-            noclipConnection = nil
-        end
-    end
-end
-
 ToggleBtn.MouseButton1Click:Connect(function()
     AutoFarmEnabled = not AutoFarmEnabled
-    setNoclip(AutoFarmEnabled)
 
     if AutoFarmEnabled then
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(45, 180, 85)
@@ -472,46 +594,19 @@ ToggleBtn.MouseButton1Click:Connect(function()
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(180, 45, 45)
         ToggleBtn.Text = "AUTO FARM: OFF"
         StatusLabel.Text = "Khu vực: " .. getCurrentWorldName() .. " | Cấp: " .. tostring(getPlayerLevel()) .. "\nTrạng thái: ĐÃ DỪNG"
-        if currentTween then
-            currentTween:Cancel()
-            currentTween = nil
-        end
+        stopTween(false)
     end
 end)
 
-local function checkWorldHop(currentLevel)
-    if isWorld1 and currentLevel >= 700 then
-        StatusLabel.Text = "Lv." .. currentLevel .. " [World 1] -> Đang chuyển sang World 2..."
-        pcall(function()
-            CommF_:InvokeServer("TravelDressrosa")
-        end)
-        task.wait(3)
-        pcall(function()
-            TeleportService:Teleport(4442272183, LocalPlayer)
-        end)
-        return true
-    elseif isWorld2 and currentLevel >= 1500 then
-        StatusLabel.Text = "Lv." .. currentLevel .. " [World 2] -> Đang chuyển sang World 3..."
-        pcall(function()
-            CommF_:InvokeServer("TravelZou")
-        end)
-        task.wait(3)
-        pcall(function()
-            TeleportService:Teleport(7449423635, LocalPlayer)
-        end)
-        return true
-    end
-    return false
-end
-
 task.spawn(function()
     while true do
-        task.wait(0.15)
+        task.wait(0.1)
         if AutoFarmEnabled then
             pcall(function()
                 local char = LocalPlayer.Character
                 if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChildOfClass("Humanoid") or char.Humanoid.Health <= 0 then
                     StatusLabel.Text = "Đang chờ hồi sinh..."
+                    stopTween(false)
                     task.wait(1)
                     return
                 end
@@ -519,6 +614,8 @@ task.spawn(function()
                 local currentLevel = getPlayerLevel()
 
                 if checkWorldHop(currentLevel) then
+                    StatusLabel.Text = "Lv." .. currentLevel .. " -> Đang chuyển World..."
+                    stopTween(false)
                     task.wait(5)
                     return
                 end
@@ -532,7 +629,7 @@ task.spawn(function()
                 if not hasClaimedQuest() then
                     StatusLabel.Text = "Lv." .. currentLevel .. " [" .. getCurrentWorldName() .. "]\nBay nhận Q: " .. tostring(qData.QuestId)
                     if qData.NpcCFrame then
-                        toCFrame(qData.NpcCFrame + Vector3.new(0, 4, 3))
+                        tweenTo(qData.NpcCFrame + Vector3.new(0, 4, 3))
                         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                         if hrp and (hrp.Position - qData.NpcCFrame.Position).Magnitude <= 18 then
                             task.wait(0.3)
@@ -546,21 +643,27 @@ task.spawn(function()
 
                     if mob and mob:FindFirstChild("HumanoidRootPart") then
                         local maxSuffix = (isWorld3 and currentLevel >= 2550 and " [MAX LV]") or ""
-                        StatusLabel.Text = "Lv." .. currentLevel .. maxSuffix .. " [" .. getCurrentWorldName() .. "]\nĐang farm & gom: " .. tostring(mobName)
-                        
+                        StatusLabel.Text = "Lv." .. currentLevel .. maxSuffix .. " [" .. getCurrentWorldName() .. "]\nFast Attack: " .. tostring(mobName)
+
                         local mobCF = mob.HumanoidRootPart.CFrame
                         bringMobs(mobName, mobCF)
 
+                        local hoverCF = CFrame.new(mobCF.Position + Vector3.new(0, FARM_HEIGHT, 0)) * CFrame.Angles(math.rad(-90), 0, 0)
                         local hrp = LocalPlayer.Character.HumanoidRootPart
-                        hrp.CFrame = CFrame.new(mobCF.Position + Vector3.new(0, 20, 0)) * CFrame.Angles(math.rad(-90), 0, 0)
-                        hrp.Velocity = Vector3.zero
 
-                        attackEnemy(mob)
+                        if (hrp.Position - hoverCF.Position).Magnitude > 25 then
+                            tweenTo(hoverCF)
+                        else
+                            TweenController.Hovering = true
+                            TweenController.HoverCFrame = hoverCF
+                        end
+
+                        executeFastAttack()
                     else
                         local spawnPos = getMobSpawnPosition(mobName)
                         if spawnPos then
                             StatusLabel.Text = "Lv." .. currentLevel .. " [" .. getCurrentWorldName() .. "]\nĐợi quái hồi sinh: " .. tostring(mobName)
-                            toCFrame(CFrame.new(spawnPos + Vector3.new(0, 25, 0)))
+                            tweenTo(CFrame.new(spawnPos + Vector3.new(0, 25, 0)))
                         else
                             StatusLabel.Text = "Lv." .. currentLevel .. " | Tìm vị trí quái: " .. tostring(mobName)
                         end
