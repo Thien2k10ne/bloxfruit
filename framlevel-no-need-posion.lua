@@ -15,6 +15,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
+local TeleportService = game:GetService("TeleportService")
 
 local Quests = require(ReplicatedStorage:WaitForChild("Quests"))
 local GuideModule = require(ReplicatedStorage:WaitForChild("GuideModule"))
@@ -22,9 +23,18 @@ local NPCList = GuideModule.Data.NPCList
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local CommF_ = Remotes:WaitForChild("CommF_")
 
+local isWorld1 = game.PlaceId == 2753915549 or game.PlaceId == 85211729168715
+local isWorld2 = game.PlaceId == 4442272183 or game.PlaceId == 79091703265657
+local isWorld3 = game.PlaceId == 7449423635 or game.PlaceId == 100117331123089
+
 local AutoFarmEnabled = false
 local currentTween = nil
 local noclipConnection = nil
+
+pcall(function()
+    setscriptable(LocalPlayer, "SimulationRadius", true)
+    sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+end)
 
 local function getHUI()
     if gethui then return gethui() end
@@ -38,6 +48,50 @@ local function getPlayerLevel()
         return LocalPlayer.Data.Level.Value
     end)
     return (ok and tonumber(lvl)) or 1
+end
+
+local function getCurrentWorldName()
+    if isWorld1 then return "World 1" end
+    if isWorld2 then return "World 2" end
+    if isWorld3 then return "World 3" end
+    return "Unknown"
+end
+
+local function bringMobs(mobName, centerCFrame)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return end
+
+    for _, mob in ipairs(enemies:GetChildren()) do
+        if mob.Name == mobName then
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local root = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+
+            if hum and hum.Health > 0 and root then
+                if (root.Position - centerCFrame.Position).Magnitude <= 350 then
+                    for _, part in ipairs(mob:GetChildren()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    root.AssemblyAngularVelocity = Vector3.zero
+                    hum.WalkSpeed = 0
+
+                    local bv = root:FindFirstChild("FarmingVelocity")
+                    if not bv then
+                        bv = Instance.new("BodyVelocity")
+                        bv.Name = "FarmingVelocity"
+                        bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                        bv.Velocity = Vector3.zero
+                        bv.Parent = root
+                    end
+
+                    root.CFrame = centerCFrame
+                end
+            end
+        end
+    end
 end
 
 local function getMobSpawnPosition(mobName)
@@ -219,28 +273,6 @@ local function getTargetMob(mobName)
     return nearestMob
 end
 
-local function bringMobs(mobName, centerCFrame)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not enemies then return end
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == mobName then
-            local hum = mob:FindFirstChildOfClass("Humanoid")
-            local root = mob:FindFirstChild("HumanoidRootPart")
-            if hum and hum.Health > 0 and root then
-                if (root.Position - centerCFrame.Position).Magnitude <= 320 then
-                    root.CFrame = centerCFrame
-                    root.CanCollide = false
-                    root.Velocity = Vector3.zero
-                    if hum.WalkSpeed ~= 0 then
-                        hum.WalkSpeed = 0
-                    end
-                end
-            end
-        end
-    end
-end
-
 local function equipBestWeapon()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChildOfClass("Humanoid") then return end
@@ -345,8 +377,8 @@ ScreenGui.Parent = parentGui
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 270, 0, 190)
-MainFrame.Position = UDim2.new(0.5, -135, 0.3, 0)
+MainFrame.Size = UDim2.new(0, 280, 0, 205)
+MainFrame.Position = UDim2.new(0.5, -140, 0.25, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 29)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -365,17 +397,17 @@ Stroke.Parent = MainFrame
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 32)
 Title.BackgroundTransparency = 1
-Title.Text = "AUTO FARM LEVEL"
+Title.Text = "BLOX FRUITS | AUTO FARM LEVEL"
 Title.TextColor3 = Color3.fromRGB(255, 215, 110)
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 13
+Title.TextSize = 12
 Title.Parent = MainFrame
 
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, -20, 0, 48)
-StatusLabel.Position = UDim2.new(0, 10, 0, 36)
+StatusLabel.Size = UDim2.new(1, -20, 0, 58)
+StatusLabel.Position = UDim2.new(0, 10, 0, 34)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Cấp độ: ...\nTrạng thái: Đang chờ bật"
+StatusLabel.Text = "Khu vực: " .. getCurrentWorldName() .. " | Cấp độ: " .. tostring(getPlayerLevel()) .. "\nTrạng thái: Đang chờ bật"
 StatusLabel.TextColor3 = Color3.fromRGB(200, 205, 220)
 StatusLabel.Font = Enum.Font.Gotham
 StatusLabel.TextSize = 11
@@ -385,7 +417,7 @@ StatusLabel.Parent = MainFrame
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Name = "ToggleBtn"
 ToggleBtn.Size = UDim2.new(1, -30, 0, 45)
-ToggleBtn.Position = UDim2.new(0, 15, 0, 95)
+ToggleBtn.Position = UDim2.new(0, 15, 0, 100)
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(180, 45, 45)
 ToggleBtn.Text = "AUTO FARM: OFF"
 ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -400,9 +432,9 @@ BtnCorner.Parent = ToggleBtn
 
 local Footnote = Instance.new("TextLabel")
 Footnote.Size = UDim2.new(1, 0, 0, 20)
-Footnote.Position = UDim2.new(0, 0, 0, 152)
+Footnote.Position = UDim2.new(0, 0, 0, 165)
 Footnote.BackgroundTransparency = 1
-Footnote.Text = "Tự dò nhiệm vụ & quái không cần tọa độ"
+Footnote.Text = "Tự đổi World + Gom quái + Farm Max Lv"
 Footnote.TextColor3 = Color3.fromRGB(110, 115, 135)
 Footnote.Font = Enum.Font.GothamMedium
 Footnote.TextSize = 9
@@ -439,13 +471,38 @@ ToggleBtn.MouseButton1Click:Connect(function()
     else
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(180, 45, 45)
         ToggleBtn.Text = "AUTO FARM: OFF"
-        StatusLabel.Text = "Cấp độ: " .. tostring(getPlayerLevel()) .. "\nTrạng thái: ĐÃ DỪNG"
+        StatusLabel.Text = "Khu vực: " .. getCurrentWorldName() .. " | Cấp: " .. tostring(getPlayerLevel()) .. "\nTrạng thái: ĐÃ DỪNG"
         if currentTween then
             currentTween:Cancel()
             currentTween = nil
         end
     end
 end)
+
+local function checkWorldHop(currentLevel)
+    if isWorld1 and currentLevel >= 700 then
+        StatusLabel.Text = "Lv." .. currentLevel .. " [World 1] -> Đang chuyển sang World 2..."
+        pcall(function()
+            CommF_:InvokeServer("TravelDressrosa")
+        end)
+        task.wait(3)
+        pcall(function()
+            TeleportService:Teleport(4442272183, LocalPlayer)
+        end)
+        return true
+    elseif isWorld2 and currentLevel >= 1500 then
+        StatusLabel.Text = "Lv." .. currentLevel .. " [World 2] -> Đang chuyển sang World 3..."
+        pcall(function()
+            CommF_:InvokeServer("TravelZou")
+        end)
+        task.wait(3)
+        pcall(function()
+            TeleportService:Teleport(7449423635, LocalPlayer)
+        end)
+        return true
+    end
+    return false
+end
 
 task.spawn(function()
     while true do
@@ -454,21 +511,26 @@ task.spawn(function()
             pcall(function()
                 local char = LocalPlayer.Character
                 if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChildOfClass("Humanoid") or char.Humanoid.Health <= 0 then
-                    StatusLabel.Text = "Đang chờ nhân vật hồi sinh..."
+                    StatusLabel.Text = "Đang chờ hồi sinh..."
                     task.wait(1)
                     return
                 end
 
                 local currentLevel = getPlayerLevel()
-                local qData = getQuestData()
 
+                if checkWorldHop(currentLevel) then
+                    task.wait(5)
+                    return
+                end
+
+                local qData = getQuestData()
                 if not qData then
-                    StatusLabel.Text = "Lv." .. currentLevel .. " | Không tìm thấy nhiệm vụ!"
+                    StatusLabel.Text = "Lv." .. currentLevel .. " | Không có nhiệm vụ phù hợp!"
                     return
                 end
 
                 if not hasClaimedQuest() then
-                    StatusLabel.Text = "Lv." .. currentLevel .. " | Bay nhận Q: " .. tostring(qData.QuestId)
+                    StatusLabel.Text = "Lv." .. currentLevel .. " [" .. getCurrentWorldName() .. "]\nBay nhận Q: " .. tostring(qData.QuestId)
                     if qData.NpcCFrame then
                         toCFrame(qData.NpcCFrame + Vector3.new(0, 4, 3))
                         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -483,7 +545,9 @@ task.spawn(function()
                     local mob = getTargetMob(mobName)
 
                     if mob and mob:FindFirstChild("HumanoidRootPart") then
-                        StatusLabel.Text = "Lv." .. currentLevel .. " | Đang đánh: " .. tostring(mobName)
+                        local maxSuffix = (isWorld3 and currentLevel >= 2550 and " [MAX LV]") or ""
+                        StatusLabel.Text = "Lv." .. currentLevel .. maxSuffix .. " [" .. getCurrentWorldName() .. "]\nĐang farm & gom: " .. tostring(mobName)
+                        
                         local mobCF = mob.HumanoidRootPart.CFrame
                         bringMobs(mobName, mobCF)
 
@@ -495,7 +559,7 @@ task.spawn(function()
                     else
                         local spawnPos = getMobSpawnPosition(mobName)
                         if spawnPos then
-                            StatusLabel.Text = "Lv." .. currentLevel .. " | Đợi quái: " .. tostring(mobName)
+                            StatusLabel.Text = "Lv." .. currentLevel .. " [" .. getCurrentWorldName() .. "]\nĐợi quái hồi sinh: " .. tostring(mobName)
                             toCFrame(CFrame.new(spawnPos + Vector3.new(0, 25, 0)))
                         else
                             StatusLabel.Text = "Lv." .. currentLevel .. " | Tìm vị trí quái: " .. tostring(mobName)
@@ -506,44 +570,3 @@ task.spawn(function()
         end
     end
 end)
-pcall(function()
-    setscriptable(LocalPlayer, "SimulationRadius", true)
-    sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
-end)
-
-local function bringMobs(mobName, centerCFrame)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not enemies then return end
-
-    for _, mob in ipairs(enemies:GetChildren()) do
-        if mob.Name == mobName then
-            local hum = mob:FindFirstChildOfClass("Humanoid")
-            local root = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-
-            if hum and hum.Health > 0 and root then
-                if (root.Position - centerCFrame.Position).Magnitude <= 350 then
-                    for _, part in ipairs(mob:GetChildren()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
-                    end
-
-                    root.AssemblyLinearVelocity = Vector3.zero
-                    root.AssemblyAngularVelocity = Vector3.zero
-                    hum.WalkSpeed = 0
-
-                    local bv = root:FindFirstChild("FarmingVelocity")
-                    if not bv then
-                        bv = Instance.new("BodyVelocity")
-                        bv.Name = "FarmingVelocity"
-                        bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-                        bv.Velocity = Vector3.zero
-                        bv.Parent = root
-                    end
-
-                    root.CFrame = centerCFrame
-                end
-            end
-        end
-    end
-end
