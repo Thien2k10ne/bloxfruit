@@ -5,5 +5,5 @@ Please use these sources to build a hub, and consider giving me a star to show y
 
 # Thank you for using >_
 
-## Còn đây là obf luraph v15.1 free scoure 
+## Còn đây là obf luraph v15.1 free src 
 ## https://github.com/aztvn/AZT-Obfuscator-Soucre
