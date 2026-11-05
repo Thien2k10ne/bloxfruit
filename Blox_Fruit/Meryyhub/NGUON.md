@@ -1,1 +1,1 @@
-The script is taken from the TBOY Roblox Discord.
+## The script is taken from the TBOY Roblox Discord.
