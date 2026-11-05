@@ -1,3 +1,4 @@
+--__thienhuynhngoc__
 getgenv().Key = "NO_KEY_NEEDED"
 getgenv().__BANANA_SCRIPT_ROUTE = "kaigod"
 Config = {
